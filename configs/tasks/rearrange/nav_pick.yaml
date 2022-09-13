@@ -12,8 +12,8 @@ ENVIRONMENT:
 DATASET:
     TYPE: RearrangeDataset-v0
     SPLIT: train
-    DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
-    SCENES_DIR: data/replica_cad/
+    DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_10.json.gz
+    SCENES_DIR: "data/test_scene_dataset/"
 TASK:
     TYPE: RearrangeCompositeTask-v0
 
@@ -31,7 +31,7 @@ TASK:
     EASY_INIT: false
     TASK_SPEC_BASE_PATH: configs/tasks/rearrange/pddl/
     TASK_SPEC: nav_pick
-    PDDL_DOMAIN_DEF: replica_cad
+    PDDL_DOMAIN_DEF: floorplanner
     SENSORS:
     - RELATIVE_RESTING_POS_SENSOR
     - TARGET_START_SENSOR

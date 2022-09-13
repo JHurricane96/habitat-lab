@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import os.path as osp
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -305,7 +306,18 @@ class RearrangeSim(HabitatSim):
         base_dir = osp.join(*self.ep_info["scene_id"].split("/")[:2])
 
         navmesh_path = osp.join(base_dir, "navmeshes", scene_name + ".navmesh")
-        self.pathfinder.load_nav_mesh(navmesh_path)
+        if osp.exists(navmesh_path):
+            self.pathfinder.load_nav_mesh(navmesh_path)
+        else:
+            self.navmesh_settings = NavMeshSettings()
+            self.navmesh_settings.set_defaults()
+            agent_config = self._get_agent_config()
+            self.navmesh_settings.agent_radius = agent_config.RADIUS
+            self.navmesh_settings.agent_height = agent_config.HEIGHT
+            # self.navmesh_settings.agent_max_climb = agent_config.MAX_CLIMB
+            self.recompute_navmesh(self.pathfinder, self.navmesh_settings, include_static_objects=True)
+            os.makedirs(osp.dirname(navmesh_path), exist_ok=True)
+            self.pathfinder.save_nav_mesh(navmesh_path)
 
         self._navmesh_vertices = np.stack(
             self.pathfinder.build_navmesh_vertices(), axis=0
