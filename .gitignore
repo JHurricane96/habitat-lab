@@ -96,3 +96,5 @@ data
 # outputs from other libraries
 /sandbox
 /plots/outputs
+
+logs/

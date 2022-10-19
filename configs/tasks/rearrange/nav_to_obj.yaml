@@ -10,8 +10,8 @@ ENVIRONMENT:
 DATASET:
     TYPE: RearrangeDataset-v0
     SPLIT: train
-    DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
-    SCENES_DIR: data/replica_cad/
+    DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_1k.json.gz
+    SCENES_DIR: "data/test_scene_dataset/"
 TASK:
     TYPE: NavToObjTask-v0
     MUST_LOOK_AT_TARG: true
@@ -24,7 +24,7 @@ TASK:
     FILTER_NAV_TO_TASKS: []
     TASK_SPEC_BASE_PATH: configs/tasks/rearrange/pddl/
     TASK_SPEC: nav_pick_nav_place
-    PDDL_DOMAIN_DEF: replica_cad
+    PDDL_DOMAIN_DEF: floorplanner
     OBJ_SUCC_THRESH: 0.3
     ART_SUCC_THRESH: 0.15
     REWARD_MEASURE: nav_to_obj_reward

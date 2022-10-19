@@ -6,9 +6,12 @@
 import argparse
 import random
 from typing import Optional
+from pathlib import Path
 
+import habitat
 import numpy as np
 import torch
+import quaternion
 
 from habitat.config import Config
 from habitat_baselines.common.baseline_registry import baseline_registry
@@ -31,7 +34,7 @@ def build_parser(
     )
     parser.add_argument(
         "--exp-config",
-        type=str,
+        type=Path,
         required=True,
         help="path to config yaml containing info about experiment",
     )
@@ -74,7 +77,12 @@ def execute_exp(config: Config, run_type: str) -> None:
         trainer.eval()
 
 
-def run_exp(exp_config: str, run_type: str, opts=None) -> None:
+def dump_config(config: Config, config_path: Path) -> None:
+    with open(Path(config.CONFIG_DUMP_FOLDER)/config_path.name, "w") as f:
+        f.write(config.dump())
+
+
+def run_exp(exp_config: Path, run_type: str, opts=None) -> None:
     r"""Runs experiment given mode and config
 
     Args:
@@ -85,7 +93,8 @@ def run_exp(exp_config: str, run_type: str, opts=None) -> None:
     Returns:
         None.
     """
-    config = get_config(exp_config, opts)
+    config = get_config(str(exp_config), opts)
+    dump_config(config, exp_config)
     execute_exp(config, run_type)
 
 

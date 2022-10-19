@@ -122,6 +122,7 @@ class ResNetEncoder(nn.Module):
             if len(v.shape) > 1
             and k != ImageGoalSensor.cls_uuid
             and "debug" not in k
+            and "third" not in k
         ]
         self.key_needs_rescaling = {k: None for k in self.visual_keys}
         for k, v in observation_space.spaces.items():
@@ -376,7 +377,7 @@ class PointNavResNetNet(Net):
                 {
                     k: observation_space.spaces[k]
                     for k in fuse_keys
-                    if len(observation_space.spaces[k].shape) == 3
+                    if len(observation_space.spaces[k].shape) == 3 and "third" not in k
                 }
             )
 

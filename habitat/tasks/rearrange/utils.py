@@ -403,7 +403,7 @@ def get_robot_spawns(
     for _ in range(num_spawn_attemps):
         sim.set_state(state)
         start_pos = sim.pathfinder.get_random_navigable_point_near(
-            targ_pos, dist_thresh
+            targ_pos, dist_thresh, 200
         )
         start_pos[[0, 2]] += np.random.normal(0, base_pertub_noise, size=(2,))
 

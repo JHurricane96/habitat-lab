@@ -6,8 +6,10 @@ ENVIRONMENT:
 DATASET:
     TYPE: RearrangeDataset-v0
     SPLIT: train
-    DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
-    SCENES_DIR: "data/replica_cad/"
+    # DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
+    # SCENES_DIR: "data/replica_cad/"
+    DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_1.json.gz
+    SCENES_DIR: "data/test_scene_dataset/"
 TASK:
     TYPE: RearrangePickTask-v0
     COUNT_OBJ_COLLISIONS: True
@@ -16,7 +18,8 @@ TASK:
     # In radians
     BASE_ANGLE_NOISE: 0.15
     BASE_NOISE: 0.05
-    SPAWN_MAX_DIST_TO_OBJ: 2.0
+    # SPAWN_MAX_DIST_TO_OBJ: 2.0
+    SPAWN_MAX_DIST_TO_OBJ: 0.5
     FORCE_REGENERATE: False
     NUM_SPAWN_ATTEMPTS: 1000
     PHYSICS_STABILITY_STEPS: 10
@@ -61,6 +64,8 @@ TASK:
         MIN_FORCE: 20.0
     FORCE_TERMINATE:
         TYPE: "ForceTerminate"
+        # MAX_ACCUM_FORCE: 20000.0
+        # MAX_ACCUM_FORCE: 10000.0
         MAX_ACCUM_FORCE: 5000.0
     END_EFFECTOR_TO_OBJECT_DISTANCE:
         TYPE: "EndEffectorToObjectDistance"

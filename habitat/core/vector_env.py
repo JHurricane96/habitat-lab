@@ -250,6 +250,10 @@ class VectorEnv:
             command, data = connection_read_fn()
             while command != CLOSE_COMMAND:
                 if command == STEP_COMMAND:
+                    if data.shape[0] == 12:
+                        data = data[:-1]
+                        import pdb
+                        pdb.set_trace()
                     observations, reward, done, info = env.step(data)
                     if auto_reset_done and done:
                         observations = env.reset()
