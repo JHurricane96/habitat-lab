@@ -388,72 +388,84 @@ def write_gfx_replay(gfx_keyframe_str, task_config, ep_id):
 
 
 def get_robot_spawns(
-    targ_pos,
-    base_pertub_noise,
-    rot_perturb_noise,
-    dist_thresh,
+    targ_pos: np.ndarray,
+    rot_perturb_noise: float,
+    dist_threshs: List[int],
     sim,
-    num_spawn_attemps,
-    physics_stability_steps,
+    all_num_spawn_attemps: List[int],
+    physics_stability_steps: int,
 ):
-    forward = np.array([1.0, 0, 0])
+    """
+    :param dist_threshs: Will try sampling the robot at the distance thresholds
+        from first to last. This list should be in increasing order because this
+        means more aggressive (closer to the `targ_pos`) samples are attempted
+        first.
+    :param all_num_spawn_attemps: The number of sample attempts per distance threshold.
+    """
+
     state = sim.capture_state()
 
-    # Try to place the robot.
-    for _ in range(num_spawn_attemps):
-        sim.set_state(state)
-        start_pos = sim.pathfinder.get_random_navigable_point_near(
-            targ_pos, dist_thresh
-        )
-        start_pos[[0, 2]] += np.random.normal(0, base_pertub_noise, size=(2,))
-
-        rel_targ = targ_pos - start_pos
-        angle_to_obj = get_angle(forward[[0, 2]], rel_targ[[0, 2]])
-        if np.cross(forward[[0, 2]], rel_targ[[0, 2]]) > 0:
-            angle_to_obj *= -1.0
-
-        targ_dist = np.linalg.norm((start_pos - targ_pos)[[0, 2]])
-
-        is_navigable = sim.pathfinder.is_navigable(start_pos)
-
-        # Face the robot towards the object.
-        rot_noise = np.random.normal(0.0, rot_perturb_noise)
-        start_rot = angle_to_obj + rot_noise
-
-        if targ_dist > dist_thresh or not is_navigable:
-            continue
-
-        sim.robot.base_pos = start_pos
-        sim.robot.base_rot = start_rot
-
-        # Ensure the target is within reach
-        robot_T = sim.robot.base_transformation
-        rel_targ_pos = robot_T.inverted().transform_point(targ_pos)
-        eps = 1e-2
-        upper_bound = sim.robot.params.ee_constraint[:, 1] + eps
-        is_within_bounds = (rel_targ_pos < upper_bound).all()
-        if not is_within_bounds:
-            continue
-
-        # Make sure the robot is not colliding with anything in this
-        # position.
-        for _ in range(physics_stability_steps):
-            sim.internal_step(-1)
-            _, details = rearrange_collision(
-                sim,
-                False,
-                ignore_base=False,
-            )
-
-            # Only care about collisions between the robot and scene.
-            did_collide = details.robot_scene_colls != 0
-
-            if did_collide:
-                break
-
-        if not did_collide:
+    for num_spawn_attempts, dist_thresh in zip(
+        all_num_spawn_attemps, dist_threshs
+    ):
+        # Try to place the robot.
+        for _ in range(num_spawn_attempts):
             sim.set_state(state)
-            return start_pos, start_rot, False
+            start_pos = sim.pathfinder.get_random_navigable_point_near(
+                targ_pos, dist_thresh
+            )
+            # start_pos[[0, 2]] += np.random.normal(0, base_pertub_noise, size=(2,))
+
+            rel_targ = targ_pos - start_pos
+
+            angle_to_obj = get_angle_to_pos(rel_targ)
+
+            targ_dist = np.linalg.norm((start_pos - targ_pos)[[0, 2]])
+
+            is_navigable = sim.pathfinder.is_navigable(start_pos)
+
+            # Face the robot towards the object.
+            rot_noise = np.random.normal(0.0, rot_perturb_noise)
+            start_rot = angle_to_obj + rot_noise
+
+            if targ_dist > dist_thresh or not is_navigable:
+                continue
+
+            sim.robot.base_pos = start_pos
+            sim.robot.base_rot = start_rot
+
+            # Make sure the robot is not colliding with anything in this
+            # position.
+            for _ in range(physics_stability_steps):
+                sim.perform_discrete_collision_detection()
+                _, details = rearrange_collision(
+                    sim,
+                    False,
+                    ignore_base=False,
+                )
+
+                # Only care about collisions between the robot and scene.
+                did_collide = details.robot_scene_colls != 0
+
+                if did_collide:
+                    break
+
+            if not did_collide:
+                sim.set_state(state)
+                return start_pos, start_rot, False
 
     sim.set_state(state)
     return start_pos, start_rot, True
+
+
+def get_angle_to_pos(rel_pos: np.ndarray) -> float:
+    forward = np.array([1.0, 0, 0])
+    rel_pos = np.array(rel_pos)
+    forward = forward[[0, 2]]
+    rel_pos = rel_pos[[0, 2]]
+
+    heading_angle = get_angle(forward, rel_pos)
+    c = np.cross(forward, rel_pos) < 0
+    if not c:
+        heading_angle = -1.0 * heading_angle
+    return heading_angle
