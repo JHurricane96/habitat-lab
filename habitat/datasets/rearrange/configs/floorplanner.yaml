@@ -1,12 +1,13 @@
 ---
 dataset_path: "data/test_scene_dataset/floorplanner.scene_dataset_config.json"
+# dataset_path: "data/floorplanner_scenes/decomposed-scenes-with-compressed-assets/hab-fp.scene_dataset_config.json"
 additional_object_paths:
   - "data/objects/ycb/configs/"
 scene_sets:
   -
     name: "any"
     included_substrings:
-      - "102815859"
+      - "102815859."
     excluded_substrings: []
 
 object_sets:
@@ -30,6 +31,7 @@ receptacle_sets:
       - ""
     excluded_object_substrings: []
     included_receptacle_substrings:
+      # - ""
       - "receptacle_hall_shelf_lower"
       - "receptacle_hall_shelf_middle"
       - "receptacle_kitchen_counter_corner"
@@ -58,12 +60,20 @@ scene_sampler:
 
 object_samplers:
   -
+    name: "clutter"
+    type: "uniform"
+    params:
+      object_sets: ["hab2"]
+      receptacle_sets: ["hab2"]
+      num_samples: [30, 30]
+      orientation_sampling: "up"
+  -
     name: "hab2"
     type: "uniform"
     params:
       object_sets: ["hab2"]
       receptacle_sets: ["hab2"]
-      num_samples: [1, 25]
+      num_samples: [1, 1]
       orientation_sampling: "up"
       nav_to_min_distance: 1.5
 

@@ -155,10 +155,37 @@ class NavToObjReward(RearrangeReward):
         self._metric = reward
 
 
-@registry.register_measure
-class DistToGoal(Measure):
-    cls_uuid: str = "dist_to_goal"
+# @registry.register_measure
+# class DistToGoal(Measure):
+#     cls_uuid: str = "dist_to_goal"
 
+#     def __init__(self, *args, sim, config, task, **kwargs):
+#         self._config = config
+#         self._sim = sim
+#         self._prev_dist = None
+#         super().__init__(*args, sim=sim, config=config, task=task, **kwargs)
+
+#     def reset_metric(self, *args, episode, task, observations, **kwargs):
+#         self._prev_dist = self._get_cur_geo_dist(task)
+#         self.update_metric(
+#             *args,
+#             episode=episode,
+#             task=task,
+#             observations=observations,
+#             **kwargs,
+#         )
+
+#     def _get_cur_geo_dist(self, task):
+#         return np.linalg.norm(self._sim.robot.base_pos - task.nav_goal_pos)
+
+#     @staticmethod
+#     def _get_uuid(*args, **kwargs):
+#         return DistToGoal.cls_uuid
+
+#     def update_metric(self, *args, episode, task, observations, **kwargs):
+#         self._metric = self._get_cur_geo_dist(task)
+
+class GeoMeasure(Measure):
     def __init__(self, *args, sim, config, task, **kwargs):
         self._config = config
         self._sim = sim
@@ -175,8 +202,25 @@ class DistToGoal(Measure):
             **kwargs,
         )
 
+    def _get_agent_pos(self):
+        current_pos = self._sim.robot.base_pos
+        return self._sim.safe_snap_point(current_pos)
+
     def _get_cur_geo_dist(self, task):
-        return np.linalg.norm(self._sim.robot.base_pos - task.nav_goal_pos)
+        distance_to_target = self._sim.geodesic_distance(
+            self._get_agent_pos(),
+            task.nav_target_pos,
+        )
+
+        if distance_to_target == np.inf:
+            distance_to_target = self._prev_dist
+        if distance_to_target is None:
+            distance_to_target = 30
+        return distance_to_target
+
+@registry.register_measure
+class DistToGoal(GeoMeasure):
+    cls_uuid: str = "dist_to_goal"
 
     @staticmethod
     def _get_uuid(*args, **kwargs):

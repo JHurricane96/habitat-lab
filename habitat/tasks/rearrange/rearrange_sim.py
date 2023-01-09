@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import os.path as osp
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -235,6 +236,12 @@ class RearrangeSim(HabitatSim):
         # Get the starting positions of the target objects.
         rom = self.get_rigid_object_manager()
         scene_pos = self.get_scene_pos()
+        try:
+            for t_handle in self._targets:
+                rom.get_object_by_handle(t_handle).object_id
+        except:
+            import pdb
+            pdb.set_trace()
         self.target_start_pos = np.array(
             [
                 scene_pos[
@@ -312,7 +319,18 @@ class RearrangeSim(HabitatSim):
         base_dir = osp.join(*self.ep_info["scene_id"].split("/")[:2])
 
         navmesh_path = osp.join(base_dir, "navmeshes", scene_name + ".navmesh")
-        self.pathfinder.load_nav_mesh(navmesh_path)
+        if osp.exists(navmesh_path):
+            self.pathfinder.load_nav_mesh(navmesh_path)
+        else:
+            self.navmesh_settings = NavMeshSettings()
+            self.navmesh_settings.set_defaults()
+            agent_config = self._get_agent_config()
+            self.navmesh_settings.agent_radius = agent_config.RADIUS + 0.1
+            self.navmesh_settings.agent_height = agent_config.HEIGHT
+            # self.navmesh_settings.agent_max_climb = agent_config.MAX_CLIMB
+            self.recompute_navmesh(self.pathfinder, self.navmesh_settings, include_static_objects=True)
+            os.makedirs(osp.dirname(navmesh_path), exist_ok=True)
+            self.pathfinder.save_nav_mesh(navmesh_path)
 
         self._navmesh_vertices = np.stack(
             self.pathfinder.build_navmesh_vertices(), axis=0
@@ -673,7 +691,9 @@ class RearrangeSim(HabitatSim):
 
             debug_obs = self.get_sensor_observations()
             obs["robot_third_rgb"] = debug_obs["robot_third_rgb"][:, :, :3]
-
+        
+        obs["robot_head_depth"][np.isclose(obs["robot_head_depth"], 0)] = 1
+        
         return obs
 
     def maybe_update_robot(self):

@@ -18,6 +18,7 @@ from habitat.core.registry import registry
 from habitat.core.utils import DatasetFloatJSONEncoder
 from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
 from habitat.datasets.utils import check_and_gen_physics_config
+from habitat.tasks.nav.object_nav_task import ObjectViewLocation
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -34,6 +35,7 @@ class RearrangeEpisode(Episode):
     ao_states: Dict[str, Dict[int, float]]
     rigid_objs: List[Tuple[str, np.ndarray]]
     targets: Dict[str, np.ndarray]
+    target_view_locations: Dict[str, List[ObjectViewLocation]]
     markers: Dict[str, Tuple[str, Tuple]] = {}
     target_receptacles: List[Tuple[str, int]] = []
     goal_receptacles: List[Tuple[str, int]] = []

@@ -6,7 +6,7 @@
 
 import copy
 import os.path as osp
-from collections import OrderedDict
+from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
@@ -175,6 +175,19 @@ class RearrangeTask(NavigationTask):
             if self._should_place_robot:
                 for agent_idx in range(self._sim.num_robots):
                     self._set_robot_start(agent_idx)
+
+        self.iids = defaultdict(list)
+        rom = self._sim.get_rigid_object_manager()
+        for handle in rom.get_object_handles():
+            obj = rom.get_object_by_handle(handle)
+            # print(handle, obj.object_id + 1)
+            obj_cat = handle.split("_:")[0]
+            if obj_cat[0].isdigit():
+                obj_cat = obj_cat.split("_", 1)[1]
+            for node in obj.visual_scene_nodes:
+                node.semantic_id = obj.object_id + 1
+            self.iids[obj_cat].append(obj.object_id + 1)
+        self.iids = dict(self.iids)
 
         self.prev_measures = self.measurements.get_metrics()
         self._targ_idx = 0

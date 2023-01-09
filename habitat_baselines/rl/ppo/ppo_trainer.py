@@ -416,7 +416,7 @@ class PPOTrainer(BaseRLTrainer):
 
         return results
 
-    def _compute_actions_and_step_envs(self, buffer_index: int = 0):
+    def _compute_actions_and_step_envs(self, buffer_index: int = 0, debug=False):
         num_envs = self.envs.num_envs
         env_slice = slice(
             int(buffer_index * num_envs / self._nbuffers),
@@ -463,6 +463,8 @@ class PPOTrainer(BaseRLTrainer):
                 )
             else:
                 act = act.item()
+            # if debug:
+            #     act = np.concatenate((act, [2.])).astype(np.float32)
             self.envs.async_step_at(index_env, act)
 
         self.env_time += time.time() - t_step_env
@@ -752,6 +754,7 @@ class PPOTrainer(BaseRLTrainer):
             while not self.is_done():
                 profiling_wrapper.on_start_step()
                 profiling_wrapper.range_push("train update")
+                print("loop start")
 
                 if ppo_cfg.use_linear_clip_decay:
                     self.agent.clip_param = ppo_cfg.clip_param * (
@@ -799,7 +802,21 @@ class PPOTrainer(BaseRLTrainer):
                 for buffer_index in range(self._nbuffers):
                     self._compute_actions_and_step_envs(buffer_index)
 
+                print("rollouts collected")
+                print("num updates", self.num_updates_done)
+
+                # if self.num_updates_done == 23:
+                #     import pdb
+                #     pdb.set_trace()
+
                 for step in range(ppo_cfg.num_steps):
+                    debug=False
+                    if self.num_updates_done == 23:
+                        print("step", step)
+                        if step == 87:
+                            debug=True
+                            # import pdb
+                            # pdb.set_trace()
                     is_last_step = (
                         self.should_end_early(step + 1)
                         or (step + 1) == ppo_cfg.num_steps
@@ -819,7 +836,7 @@ class PPOTrainer(BaseRLTrainer):
                                     "_collect_rollout_step"
                                 )
 
-                            self._compute_actions_and_step_envs(buffer_index)
+                            self._compute_actions_and_step_envs(buffer_index, debug)
 
                     if is_last_step:
                         break
@@ -841,6 +858,8 @@ class PPOTrainer(BaseRLTrainer):
                 )
 
                 self._training_log(writer, losses, prev_time)
+
+                print("learning done")
 
                 # checkpoint model
                 if rank0_only() and self.should_checkpoint():

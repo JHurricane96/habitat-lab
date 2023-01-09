@@ -6,8 +6,11 @@ ENVIRONMENT:
 DATASET:
     TYPE: RearrangeDataset-v0
     SPLIT: train
-    DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/rearrange_easy.json.gz
-    SCENES_DIR: "data/replica_cad/"
+    # DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
+    # SCENES_DIR: "data/replica_cad/"
+    # DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_1.json.gz
+    DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_100_clutter_no_vp.json.gz
+    SCENES_DIR: "data/test_scene_dataset/"
 TASK:
     TYPE: RearrangePickTask-v0
     COUNT_OBJ_COLLISIONS: True
@@ -89,7 +92,7 @@ SIMULATOR:
         HEIGHT: 1.5
         RADIUS: 0.3
         JOINT_START_NOISE: 0.2
-        SENSORS: ['HEAD_DEPTH_SENSOR']
+        SENSORS: ['HEAD_DEPTH_SENSOR', 'HEAD_RGB_SENSOR', 'HEAD_SEMANTIC_SENSOR']
         ROBOT_URDF: ./data/robots/hab_fetch/robots/hab_suction.urdf
         ROBOT_TYPE: FetchSuctionRobot
         IK_ARM_URDF: ./data/robots/hab_fetch/robots/fetch_onlyarm.urdf
@@ -100,8 +103,8 @@ SIMULATOR:
         MAX_DEPTH: 10.0
         NORMALIZE_DEPTH: True
     HEAD_RGB_SENSOR:
-        WIDTH: 256
-        HEIGHT: 256
+        WIDTH: 512
+        HEIGHT: 512
     ARM_DEPTH_SENSOR:
         HEIGHT: 128
         MAX_DEPTH: 10.0
@@ -111,6 +114,14 @@ SIMULATOR:
     ARM_RGB_SENSOR:
         HEIGHT: 128
         WIDTH: 128
+    HEAD_SEMANTIC_SENSOR:
+        HEIGHT: 512
+        HFOV: 90
+        ORIENTATION: [0.0, 0.0, 0.0]
+        POSITION: [0, 1.25, 0]
+        TYPE: HabitatSimSemanticSensor
+        WIDTH: 512
+        UUID: robot_head_semantic
 
     HABITAT_SIM_V0:
         ALLOW_SLIDING: False

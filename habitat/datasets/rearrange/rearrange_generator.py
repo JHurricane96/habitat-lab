@@ -4,6 +4,8 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import itertools
+import os
 import os.path as osp
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,8 +14,12 @@ import magnum as mn
 import numpy as np
 from tqdm import tqdm
 from yacs.config import CfgNode as CN
+from habitat.core.simulator import AgentState
+from habitat.datasets.pointnav.pointnav_generator import ISLAND_RADIUS_LIMIT
+from habitat.datasets.rearrange.geometry_utils import direction_to_quaternion, get_bb
 
 import habitat.datasets.rearrange.samplers as samplers
+from habitat.sims.habitat_simulator.actions import HabitatSimActions
 import habitat.sims.habitat_simulator.sim_utilities as sutils
 import habitat_sim
 from habitat.core.logging import logger
@@ -25,7 +31,13 @@ from habitat.datasets.rearrange.samplers.receptacle import (
     find_receptacles,
 )
 from habitat.sims.habitat_simulator.debug_visualizer import DebugVisualizer
+from habitat.tasks.nav.object_nav_task import ObjectViewLocation
+from habitat.tasks.utils import compute_pixel_coverage
 from habitat.utils.common import cull_string_list_by_substrings
+from habitat_sim.nav import NavMeshSettings
+from habitat_sim.agent.agent import ActionSpec
+from habitat_sim.agent.controls import ActuationSpec
+from habitat_sim.utils.common import quat_to_coeffs
 
 
 def get_sample_region_ratios(load_dict) -> Dict[str, float]:
@@ -367,7 +379,7 @@ class RearrangeEpisodeGenerator:
         """
         Reset any sampler internal state related to a specific scene or episode.
         """
-        self.ep_sampled_objects = []
+        # self.ep_sampled_objects = []
         self._scene_sampler.reset()
         for sampler in self._obj_samplers.values():
             sampler.reset()
@@ -419,13 +431,18 @@ class RearrangeEpisodeGenerator:
         failed_episodes = 0
         if verbose:
             pbar = tqdm(total=num_episodes)
+        self.times = defaultdict(float)
+        import time
         while len(generated_episodes) < num_episodes:
+            t = time.process_time()
             new_episode = self.generate_single_episode()
+            print("Tot time", time.process_time() - t)
             if new_episode is None:
                 failed_episodes += 1
                 continue
             generated_episodes.append(new_episode)
             if verbose:
+                print("Generated NEW EPISODE! Num episodes:", len(generated_episodes))
                 pbar.update(1)
         if verbose:
             pbar.close()
@@ -434,33 +451,67 @@ class RearrangeEpisodeGenerator:
             f"Generated {num_episodes} episodes in {num_episodes+failed_episodes} tries."
         )
 
+        print(self.times)
+
         return generated_episodes
+    
+    def gen_cleanup(self, times):
+        for k, v in times.items():
+            self.times[k] += v
+        print(times)
 
     def generate_single_episode(self) -> Optional[RearrangeEpisode]:
         """
         Generate a single episode, sampling the scene.
         """
+        import time
+        pt = time.process_time()
+        times = {}
 
         # Reset the number of allowed objects per receptacle.
         recep_tracker = ReceptacleTracker(
             {k: v for k, v in self.cfg.max_objects_per_receptacle},
             self._receptacle_sets,
         )
+        t = time.process_time()
+        times["t1"] = t - pt
+        pt = t
 
         self._reset_samplers()
         self.episode_data: Dict[str, Dict[str, Any]] = {
             "sampled_objects": {},  # object sampler name -> sampled object instances
             "sampled_targets": {},  # target sampler name -> (object, target state)
         }
+        t = time.process_time()
+        times["t2"] = t - pt
+        pt = t
 
         ep_scene_handle = self.generate_scene()
         scene_base_dir = osp.dirname(osp.dirname(ep_scene_handle))
+        t = time.process_time()
+        times["t3"] = t - pt
+        pt = t
 
-        scene_name = ep_scene_handle.split(".")[0]
+
+        scene_name = osp.basename(ep_scene_handle).split(".")[0]
         navmesh_path = osp.join(
             scene_base_dir, "navmeshes", scene_name + ".navmesh"
         )
-        self.sim.pathfinder.load_nav_mesh(navmesh_path)
+        if osp.exists(navmesh_path):
+            self.sim.pathfinder.load_nav_mesh(navmesh_path)
+        else:
+            self.sim.navmesh_settings = NavMeshSettings()
+            self.sim.navmesh_settings.set_defaults()
+            self.sim.navmesh_settings.agent_radius = 0.2
+            self.sim.navmesh_settings.agent_height = 1.5
+            # self.sim.navmesh_settings.agent_max_climb = agent_config.MAX_CLIMB
+            self.sim.recompute_navmesh(self.sim.pathfinder, self.sim.navmesh_settings, include_static_objects=True)
+            os.makedirs(osp.dirname(navmesh_path), exist_ok=True)
+            self.sim.pathfinder.save_nav_mesh(navmesh_path)
+        t = time.process_time()
+        times["t4"] = t - pt
+        pt = t
+
 
         self._get_object_target_samplers()
         target_numbers = {
@@ -473,6 +524,10 @@ class RearrangeEpisodeGenerator:
             targ_sampler_name_to_obj_sampler_names[
                 sampler_name
             ] = targ_sampler_cfg["params"]["object_samplers"]
+        t = time.process_time()
+        times["t5"] = t - pt
+        pt = t
+
 
         target_receptacles = defaultdict(list)
         all_target_receptacles = []
@@ -492,6 +547,10 @@ class RearrangeEpisodeGenerator:
 
             target_receptacles[obj_sampler_name].extend(new_target_receptacles)
             all_target_receptacles.extend(new_target_receptacles)
+        t = time.process_time()
+        times["t6"] = t - pt
+        pt = t
+
 
         goal_receptacles = {}
         all_goal_receptacles = []
@@ -513,9 +572,17 @@ class RearrangeEpisodeGenerator:
 
             goal_receptacles[sampler_name] = new_goal_receptacles
             all_goal_receptacles.extend(new_goal_receptacles)
+        t = time.process_time()
+        times["t7"] = t - pt
+        pt = t
+
 
         for recep in [*all_goal_receptacles, *all_target_receptacles]:
             recep_tracker.inc_count(recep.name)
+        t = time.process_time()
+        times["t8"] = t - pt
+        pt = t
+
 
         # sample AO states for objects in the scene
         # ao_instance_handle -> [ (link_ix, state), ... ]
@@ -526,17 +593,28 @@ class RearrangeEpisodeGenerator:
                 [*all_target_receptacles, *all_goal_receptacles],
             )
             if sampler_states is None:
+                times["t9"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             for sampled_instance, link_states in sampler_states.items():
                 if sampled_instance.handle not in ao_states:
                     ao_states[sampled_instance.handle] = {}
                 for link_ix, joint_state in link_states.items():
                     ao_states[sampled_instance.handle][link_ix] = joint_state
+        self.ao_states = ao_states
+        t = time.process_time()
+        times["t9"] = t - pt
+        pt = t
+
 
         # visualize after setting AO states to correctly see scene state
         if self._render_debug_obs:
             self.visualize_scene_receptacles()
             self.vdb.make_debug_video(prefix="receptacles_")
+        t = time.process_time()
+        times["t10"] = t - pt
+        pt = t
+
 
         # sample object placements
         object_to_containing_receptacle = {}
@@ -549,6 +627,8 @@ class RearrangeEpisodeGenerator:
                 vdb=(self.vdb if self._render_debug_obs else None),
             )
             if len(object_sample_data) == 0:
+                times["t11"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             new_objects, receptacles = zip(*object_sample_data)
             for obj, rec in zip(new_objects, receptacles):
@@ -571,6 +651,10 @@ class RearrangeEpisodeGenerator:
                 for new_object in new_objects:
                     self.vdb.look_at(new_object.translation)
                     self.vdb.get_observation()
+        t = time.process_time()
+        times["t11"] = t - pt
+        pt = t
+
 
         # simulate the world for a few seconds to validate the placements
         if not self.settle_sim():
@@ -591,6 +675,10 @@ class RearrangeEpisodeGenerator:
                 x.creation_attributes.handle
                 for x in sampler.object_instance_set
             ]
+        t = time.process_time()
+        times["t12"] = t - pt
+        pt = t
+
 
         target_refs: Dict[str, str] = {}
 
@@ -610,6 +698,8 @@ class RearrangeEpisodeGenerator:
                 object_to_containing_receptacle=object_to_containing_receptacle,
             )
             if new_target_objects is None:
+                times["t13"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             for target_handle, (
                 new_target_obj,
@@ -621,6 +711,8 @@ class RearrangeEpisodeGenerator:
                     match_obj.translation - new_target_obj.translation
                 )
                 if dist < self.cfg.min_dist_from_start_to_goal:
+                    times["t13"] = time.process_time() - t
+                    self.gen_cleanup(times)
                     return None
 
             # cache transforms and add visualizations
@@ -659,6 +751,20 @@ class RearrangeEpisodeGenerator:
                         mn.Color4(1.0, 0.0, 0.0, 1.0),
                     )
                     self.vdb.get_observation()
+        t = time.process_time()
+        times["t13"] = t - pt
+        pt = t
+
+
+        # viewpoints = {}
+        # for target_handle, target_transform in self.episode_data["sampled_targets"].items():
+        #     # viewpoints.append(self.generate_viewpoints(target_handle, target_transform))
+        #     target_viewpoints = self.generate_viewpoints(target_handle, target_transform)
+        #     if len(target_viewpoints) == 0:
+        #         self.gen_cleanup(times)
+        #         return None
+        #     viewpoints[target_handle] = target_viewpoints
+
 
         # collect final object states and serialize the episode
         # TODO: creating shortened names should be automated and embedded in the objects to be done in a uniform way
@@ -674,6 +780,10 @@ class RearrangeEpisodeGenerator:
                     np.array(sampled_obj.transformation),
                 )
             )
+        t = time.process_time()
+        times["t14"] = t - pt
+        pt = t
+
 
         self.num_ep_generated += 1
 
@@ -690,8 +800,11 @@ class RearrangeEpisodeGenerator:
         name_to_receptacle = {
             k: v.name for k, v in object_to_containing_receptacle.items()
         }
+        t = time.process_time()
+        times["t15"] = t - pt
+        pt = t
 
-        return RearrangeEpisode(
+        ep = RearrangeEpisode(
             scene_dataset_config=self.cfg.dataset_path,
             additional_obj_config_paths=self.cfg.additional_object_paths,
             episode_id=str(self.num_ep_generated - 1),
@@ -706,6 +819,7 @@ class RearrangeEpisodeGenerator:
             ao_states=ao_states,
             rigid_objs=sampled_rigid_object_states,
             targets=self.episode_data["sampled_targets"],
+            target_view_locations={},#viewpoints,
             target_receptacles=save_target_receps,
             goal_receptacles=save_goal_receps,
             markers=self.cfg.markers,
@@ -713,12 +827,160 @@ class RearrangeEpisodeGenerator:
             info={"object_labels": target_refs},
         )
 
+        t = time.process_time()
+        times["t16"] = t - pt
+        pt = t
+
+        for k, v in times.items():
+            self.times[k] += v
+        print(times)
+        
+        return ep
+    
+    def generate_viewpoints(self, object_handle: str, object_transform: mn.Matrix4) -> List[np.ndarray]:
+        rom = self.sim.get_rigid_object_manager()
+        # import pdb
+        # pdb.set_trace()
+        # obj = rom.add_object_by_template_handle(object_handle)
+        obj = rom.get_object_by_handle(object_handle)
+        assert obj is not None
+        obj.transformation = object_transform
+        object_id = obj.object_id
+        object_aabb = get_bb(obj)
+        object_position = object_aabb.center()
+        eps = 1e-5
+
+        # object_nodes = self.sim.get_object_visual_scene_nodes(object_id)
+        # assert len(object_nodes) == 1
+        # semantic_id = object_nodes[0].semantic_id
+
+        max_distance = 1.0
+        cell_size = 0.3/2.0
+        x_len, _, z_len = object_aabb.size() / 2.0 + mn.Vector3(max_distance)
+        x_bxp = np.arange(-x_len, x_len + eps, step=cell_size) + object_position[0]
+        z_bxp = np.arange(-z_len, z_len + eps, step=cell_size) + object_position[2]
+        candidate_poses = [
+            np.array([x, object_position[1], z])
+            for x, z in itertools.product(x_bxp, z_bxp)
+        ]
+
+        def down_is_navigable(pt, search_dist=2.0):
+            pf = self.sim.pathfinder
+            delta_y = 0.05
+            max_steps = int(search_dist / delta_y)
+            step = 0
+            is_navigable = pf.is_navigable(pt, 2)
+            while not is_navigable:
+                pt[1] -= delta_y
+                is_navigable = pf.is_navigable(pt)
+                step += 1
+                if step == max_steps:
+                    return False
+            return True
+
+        def _get_iou(x, y, z):
+            pt = np.array([x, y, z])
+
+            # TODO: What is this?
+            # if not (
+            #     object_obb.distance(pt) <= max_distance
+            #     and habitat_sim.geo.OBB(object_aabb).distance(pt) <= max_distance
+            # ):
+            #     return -0.5, pt, None, 'Unknown error'
+
+            if not down_is_navigable(pt):
+                return -1.0, pt, None, 'Down is not navigable'
+            pf = self.sim.pathfinder
+            pt = np.array(pf.snap_point(pt))
+
+            goal_direction = object_position - pt
+            goal_direction[1] = 0
+
+            q = direction_to_quaternion(goal_direction)
+
+            cov = 0
+            agent = self.sim.get_agent(0)
+            for act in [
+                "look_down",
+                "look_up",
+                "look_up",
+                # HabitatSimActions.LOOK_DOWN,
+                # HabitatSimActions.LOOK_UP,
+                # HabitatSimActions.LOOK_UP,
+            ]:
+                agent.act(act)
+                for v in agent._sensors.values():
+                    v.set_transformation_from_spec()
+                # obs = self.sim.get_observations_at(pt, q, keep_agent_at_new_pose=True)
+                agent_state = agent.get_state()
+                agent_state.position = pt
+                agent_state.rotation = q
+                agent.set_state(agent_state, reset_sensors=False)
+                obs = self.sim.get_sensor_observations(0)
+                import pdb
+                pdb.set_trace()
+                cov += compute_pixel_coverage(obs["semantic"], object_id)
+                # cov += semantic_id in obs["semantic"]
+
+            # from habitat.utils.visualizations.utils import observations_to_image
+            # import imageio
+            # import os
+            # import cv2
+
+            # obs = self.sim.get_observations_at(pt, q, keep_agent_at_new_pose=True)
+            # rgb_obs = np.ascontiguousarray(obs['rgb'][..., :3])
+            # sem_obs = (obs["semantic"] == object_id).astype(np.uint8) * 255
+            # contours, _ = cv2.findContours(sem_obs, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+            # rgb_obs = cv2.drawContours(rgb_obs, contours, -1, (0, 255, 0), 4)
+            # imageio.imsave(
+            #     os.path.join(
+            #         "data/images/objnav_dataset_gen",
+            #         f"{object_category_name}_{object_name_id}_{object_id}_{x}_{z}_.png",
+            #     ), rgb_obs
+            # )
+
+            return cov, pt, q, 'Success'
+        
+        candidate_poses_ious_orig = list(_get_iou(*pos) for pos in candidate_poses)
+        n_unknown_rejected = 0
+        n_down_not_navigable_rejected = 0
+        for p in candidate_poses_ious_orig:
+            if p[-1] == 'Unknown error':
+                n_unknown_rejected += 1
+            elif p[-1] == 'Down is not navigable':
+                n_down_not_navigable_rejected += 1
+        candidate_poses_ious_orig_2 = [
+            p for p in candidate_poses_ious_orig
+            if p[0] > 0
+        ]
+
+        # Reject candidate_poses that do not satisfy island radius constraints
+        candidate_poses_ious = [
+            p for p in candidate_poses_ious_orig_2
+            if self.sim.pathfinder.island_radius(p[1]) >= ISLAND_RADIUS_LIMIT
+        ]
+
+        keep_thresh = 0
+        view_locations = [
+            ObjectViewLocation(
+                AgentState(pt.tolist(), quat_to_coeffs(q).tolist()), iou
+            )
+            for iou, pt, q, _ in candidate_poses_ious
+            if iou is not None and iou > keep_thresh
+        ]
+        view_locations = sorted(view_locations, reverse=True, key=lambda v: v.iou)
+        # view_locations = [view.agent_state.position for view in view_locations]
+
+        return view_locations
+
     def initialize_sim(self, scene_name: str, dataset_path: str) -> None:
         """
         Initialize a new Simulator object with a selected scene and dataset.
         """
         # Setup a camera coincident with the agent body node.
         # For debugging visualizations place the default agent where you want the camera with local -Z oriented toward the point of focus.
+        import time
+        t = time.process_time()
         camera_resolution = [540, 720]
         sensors = {
             "rgb": {
@@ -726,7 +988,13 @@ class RearrangeEpisodeGenerator:
                 "resolution": camera_resolution,
                 "position": [0, 0, 0],
                 "orientation": [0, 0, 0.0],
-            }
+            },
+            "semantic": {
+                "sensor_type": habitat_sim.SensorType.SEMANTIC,
+                "resolution": [256, 256],
+                "position": [0, 0, 0],
+                "orientation": [0, 0, 0.0],
+            },
         }
 
         backend_cfg = habitat_sim.SimulatorConfiguration()
@@ -754,6 +1022,13 @@ class RearrangeEpisodeGenerator:
 
         agent_cfg = habitat_sim.agent.AgentConfiguration()
         agent_cfg.sensor_specifications = sensor_specs
+        agent_cfg.action_space = {
+            "move_forward": ActionSpec("move_forward", ActuationSpec(amount=0.25)),
+            "turn_left": ActionSpec("turn_left", ActuationSpec(amount=10.0)),
+            "turn_right": ActionSpec("turn_right", ActuationSpec(amount=10.0)),
+            "look_up": ActionSpec("look_up", ActuationSpec(amount=10.0)),
+            "look_down": ActionSpec("look_down", ActuationSpec(amount=10.0)),
+        }
 
         hab_cfg = habitat_sim.Configuration(backend_cfg, [agent_cfg])
         if self.sim is None:
@@ -764,15 +1039,30 @@ class RearrangeEpisodeGenerator:
                 object_attr_mgr.load_configs(osp.abspath(object_path))
         else:
             if self.sim.config.sim_cfg.scene_id == scene_name:
-                # we need to force a reset, so reload the NONE scene
-                # TODO: we should fix this to provide an appropriate reset method
-                proxy_backend_cfg = habitat_sim.SimulatorConfiguration()
-                proxy_backend_cfg.scene_id = "NONE"
-                proxy_hab_cfg = habitat_sim.Configuration(
-                    proxy_backend_cfg, [agent_cfg]
-                )
-                self.sim.reconfigure(proxy_hab_cfg)
-            self.sim.reconfigure(hab_cfg)
+                # # we need to force a reset, so reload the NONE scene
+                # # TODO: we should fix this to provide an appropriate reset method
+                # proxy_backend_cfg = habitat_sim.SimulatorConfiguration()
+                # proxy_backend_cfg.scene_id = "NONE"
+                # proxy_hab_cfg = habitat_sim.Configuration(
+                #     proxy_backend_cfg, [agent_cfg]
+                # )
+                # self.sim.reconfigure(proxy_hab_cfg)
+                rom = self.sim.get_rigid_object_manager()
+                for object in rom.get_object_handles():
+                    rom.remove_object_by_handle(object)
+                aom = self.sim.get_articulated_object_manager()
+                for ao_handle in self.ao_states.keys():
+                    aom.get_object_by_handle(ao_handle).clear_joint_states()
+                try:
+                    assert len(rom.get_object_handles()) == 0
+                except:
+                    import pdb
+                    pdb.set_trace()
+            else:
+                self.sim.reconfigure(hab_cfg)
+        self.ep_sampled_objects = []
+        print("sim setup", time.process_time() - t)
+        t = time.process_time()
 
         # setup the debug camera state to the center of the scene bounding box
         scene_bb = (
@@ -784,6 +1074,7 @@ class RearrangeEpisodeGenerator:
         self.vdb = DebugVisualizer(
             self.sim, output_path="rearrange_ep_gen_output/"
         )
+        print("debug viz", time.process_time() - t)
 
     def settle_sim(
         self, duration: float = 5.0, make_video: bool = True
