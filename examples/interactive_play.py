@@ -51,15 +51,19 @@ from collections import defaultdict
 
 import magnum as mn
 import numpy as np
+import quaternion
 
 import habitat
 import habitat.tasks.rearrange.rearrange_task
 from habitat.tasks.rearrange.actions.actions import ArmEEAction
 from habitat.tasks.rearrange.rearrange_sensors import GfxReplayMeasure
 from habitat.tasks.rearrange.utils import euler_to_quat, write_gfx_replay
+from habitat.tasks.utils import cartesian_to_polar
+from habitat.utils.geometry_utils import quaternion_from_coeff, quaternion_rotate_vector
 from habitat.utils.render_wrapper import overlay_frame
 from habitat.utils.visualizations.utils import observations_to_image
 from habitat_sim.utils import viz_utils as vut
+from habitat_sim.nav import NavMeshSettings
 
 try:
     import pygame
@@ -309,6 +313,27 @@ class FreeCamHelper:
         return step_result
 
 
+def compute_heading_from_quaternion(r):
+    """
+    r - rotation quaternion
+
+    Computes clockwise rotation about Y.
+    """
+    # quaternion - np.quaternion unit quaternion
+    # Real world rotation
+    # direction_vector = np.array([0, 0, 1])  # Forward vector
+    # r = quaternion.quaternion(*r)
+    # heading_vector = quaternion_rotate_vector(r.inverse(), direction_vector)
+
+    # phi = -np.arctan2(heading_vector[0], heading_vector[2]).item()
+    # return phi
+    direction_vector = np.array([1, 0, 1])
+    r = quaternion_from_coeff(r).inverse()
+    heading_vector = quaternion_rotate_vector(r, direction_vector)
+    phi = cartesian_to_polar(-heading_vector[2], heading_vector[0])[1]
+    return phi
+
+
 def play_env(env, args, config):
     render_steps_limit = None
     if args.no_render:
@@ -321,6 +346,14 @@ def play_env(env, args, config):
             print("Loaded arm actions")
 
     obs = env.reset()
+
+    env._sim.navmesh_settings = NavMeshSettings()
+    env._sim.navmesh_settings.set_defaults()
+    env._sim.navmesh_settings.agent_radius = 0.2
+    env._sim.navmesh_settings.agent_height = 1.5 + 0.1
+    # env._sim.navmesh_settings.agent_max_climb = agent_config.MAX_CLIMB
+    env._sim.recompute_navmesh(env._sim.pathfinder, env._sim.navmesh_settings, include_static_objects=True)
+    print("Recomputed navmesh")
 
     if not args.no_render:
         draw_obs = observations_to_image(obs, {})
@@ -341,6 +374,8 @@ def play_env(env, args, config):
         GfxReplayMeasure.cls_uuid, None
     )
 
+    # cur_vp_idx = 0
+    # viewpoints = [(h, vp) for h, vps in env.current_episode.target_view_locations.items() for vp in vps]
     while True:
         if (
             args.save_actions
@@ -404,6 +439,17 @@ def play_env(env, args, config):
             # Clear the saved keyframes.
             if gfx_measure is not None:
                 gfx_measure.get_metric(force_get=True)
+            # cur_vp_idx += 1
+            # if cur_vp_idx >= len(viewpoints):
+            #     cur_vp_idx = 0
+            #     env.reset()
+            #     viewpoints = [(h, vp) for h, vps in env.current_episode.target_view_locations.items() for vp in vps]
+            # robot = env._sim.get_robot_data(0).robot
+            # h, vp = viewpoints[cur_vp_idx]
+            # robot.base_pos = mn.Vector3(vp["agent_state"]["position"])
+            # robot.base_rot = compute_heading_from_quaternion(vp["agent_state"]["rotation"])
+            # print("New agent pos, rot:", robot.base_pos, robot.base_rot)
+            # print("Target handle, iou:", h, vp["iou"])
             env.reset()
 
         if not args.no_render:

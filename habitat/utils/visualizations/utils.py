@@ -15,6 +15,7 @@ import tqdm
 from habitat.core.logging import logger
 from habitat.core.utils import try_cv2_import
 from habitat.utils.visualizations import maps
+from habitat_sim.utils.viz_utils import semantic_to_rgb
 
 cv2 = try_cv2_import()
 
@@ -220,6 +221,8 @@ def observations_to_image(observation: Dict, info: Dict) -> np.ndarray:
             obs_k = observation[sensor_name]
             if not isinstance(obs_k, np.ndarray):
                 obs_k = obs_k.cpu().numpy()
+            if "semantic" in sensor_name:
+                obs_k = np.array(semantic_to_rgb(obs_k))[..., :3]
             if obs_k.dtype != np.uint8:
                 obs_k = obs_k * 255.0
                 obs_k = obs_k.astype(np.uint8)

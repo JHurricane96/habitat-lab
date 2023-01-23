@@ -128,6 +128,13 @@ class RearrangeTask(NavigationTask):
 
             for agent_idx in range(self._sim.num_robots):
                 self._set_robot_start(agent_idx)
+        
+        rom = self._sim.get_rigid_object_manager()
+        for handle in rom.get_object_handles():
+            obj = rom.get_object_by_handle(handle)
+            print(handle, obj.object_id)
+            for node in obj.visual_scene_nodes:
+                node.semantic_id = obj.object_id + 1
 
         self.prev_measures = self.measurements.get_metrics()
         self._targ_idx = 0

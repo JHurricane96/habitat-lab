@@ -4,8 +4,12 @@ ENVIRONMENT:
 DATASET:
     TYPE: RearrangeDataset-v0
     SPLIT: train
-    DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
-    SCENES_DIR: "data/replica_cad/"
+    # DATA_PATH: data/datasets/replica_cad/rearrange/v1/{split}/all_receptacles_10k_1k.json.gz
+    # DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_1.json.gz
+    # DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_10_viewpoint_test.json.gz
+    DATA_PATH: data/datasets/rearrange_floorplanner/test/rearrange_floorplanner_10_no_vp.json.gz
+    # SCENES_DIR: "data/replica_cad/"
+    SCENES_DIR: "data/test_scene_dataset/"
 TASK:
     TYPE: RearrangeEmptyTask-v0
     COUNT_OBJ_COLLISIONS: True
@@ -138,7 +142,7 @@ SIMULATOR:
     AGENT_0:
         IS_SET_START_STATE: False
         RADIUS: 0.3
-        SENSORS: ['HEAD_RGB_SENSOR', 'HEAD_DEPTH_SENSOR', 'ARM_RGB_SENSOR', 'ARM_DEPTH_SENSOR']
+        SENSORS: ['HEAD_RGB_SENSOR', 'HEAD_DEPTH_SENSOR', 'ARM_RGB_SENSOR', 'ARM_DEPTH_SENSOR', 'HEAD_SEMANTIC_SENSOR']
         ROBOT_URDF: ./data/robots/hab_fetch/robots/hab_fetch.urdf
         ROBOT_TYPE: "FetchRobot"
         IK_ARM_URDF: ./data/robots/hab_fetch/robots/fetch_onlyarm.urdf
@@ -160,6 +164,14 @@ SIMULATOR:
     ARM_RGB_SENSOR:
         HEIGHT: 128
         WIDTH: 128
+    HEAD_SEMANTIC_SENSOR:
+        HEIGHT: 128
+        HFOV: 90
+        ORIENTATION: [0.0, 0.0, 0.0]
+        POSITION: [0, 1.25, 0]
+        TYPE: HabitatSimSemanticSensor
+        WIDTH: 128
+        UUID: robot_head_semantic
     CTRL_FREQ: 120.0
     DEFAULT_AGENT_ID: 0
     FORWARD_STEP_SIZE: 0.25
