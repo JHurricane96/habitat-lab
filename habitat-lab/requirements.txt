@@ -16,3 +16,4 @@ scipy>=1.0.0
 tqdm>=4.0.0
 # dataset generation dependencies
 trimesh>=3.18.1
+rtree>=1.0.1

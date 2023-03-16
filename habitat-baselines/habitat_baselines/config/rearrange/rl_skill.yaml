@@ -1,13 +1,13 @@
 # @package _global_
 
 defaults:
-  - /benchmark/rearrange: pick
+  - /benchmark/rearrange: cat_nav_to_obj
   - /habitat_baselines: habitat_baselines_rl_config_base
   - _self_
 
 habitat_baselines:
   verbose: False
-  trainer_name: "ver"
+  trainer_name: "ddppo"
   torch_gpu_id: 0
   tensorboard_dir: "tb"
   video_dir: "video_dir"
@@ -18,7 +18,7 @@ habitat_baselines:
   eval_ckpt_path_dir: "data/new_checkpoints"
   # 26 environments will just barely be below 16gb.
   # 20 environments will just barely be below 11gb.
-  num_environments: 20
+  num_environments: 16
   checkpoint_folder: "data/new_checkpoints"
   num_updates: -1
   total_num_steps: 1.0e8
@@ -72,6 +72,7 @@ habitat_baselines:
       sync_frac: 0.6
       # The PyTorch distributed backend to use
       distrib_backend: NCCL
+      # distrib_backend: GLOO
       # Visual encoder backbone
       pretrained_weights: data/ddppo-models/gibson-2plus-resnet50.pth
       # Initialize with pretrained weights

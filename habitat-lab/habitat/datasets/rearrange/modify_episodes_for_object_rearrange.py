@@ -588,6 +588,7 @@ def add_cat_fields_to_episodes(
     new_episodes["episodes"] = []
 
     for episode in tqdm(episodes["episodes"]):
+        # try:
         sim = initialize_sim(
             sim,
             existing_rigid_objects,
@@ -642,6 +643,12 @@ def add_cat_fields_to_episodes(
             and len(episode["candidate_start_receps"]) > 0
             and len(episode["candidate_goal_receps"]) > 0
         )
+        # break
+        # except Exception as e:
+        #     print("Error with episode", episode["episode_id"])
+        #     print(e)
+            # import pdb
+            # pdb.set_trace()
         new_episodes["episodes"].append(episode)
     return new_episodes
 
@@ -718,6 +725,8 @@ if __name__ == "__main__":
             enable_add_viewpoints=args.add_viewpoints,
             debug_viz=args.debug_viz,
         )
+
+        print(f"Number of episodes in {split}: {len(episodes['episodes'])}")
         episodes_json = DatasetFloatJSONEncoder().encode(episodes)
         os.makedirs(osp.join(target_data_dir, split), exist_ok=True)
         target_episodes_file = osp.join(

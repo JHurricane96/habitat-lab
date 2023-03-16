@@ -794,12 +794,12 @@ def get_navigable_receptacles(
             global_bounds.front_bottom_left,
             global_bounds.front_bottom_right,
         ]
-        is_accessible = all(
+        all_pts_accessible = all(
             is_accessible(sim, point, nav_to_min_distance)
             for point in recep_points
         )
 
-        if is_accessible:
+        if all_pts_accessible:
             logger.info(
                 f"Receptacle {receptacle.parent_object_handle}, {receptacle_obj.translation} is accessible."
             )

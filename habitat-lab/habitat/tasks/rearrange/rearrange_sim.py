@@ -339,6 +339,7 @@ class RearrangeSim(HabitatSim):
         :returns: The set base position and rotation
         """
         robot = self.get_robot_data(agent_idx).robot
+        num_collisions = 0
 
         for attempt_i in range(max_attempts):
             start_pos = self.pathfinder.get_random_navigable_point(island_index=self.navmesh_classification_results["active_island"])
@@ -357,12 +358,14 @@ class RearrangeSim(HabitatSim):
             did_collide, _ = rearrange_collision(
                 self, True, ignore_base=False, agent_idx=agent_idx
             )
+            num_collisions += int(did_collide)
             if not did_collide:
                 break
         if attempt_i == max_attempts - 1:
-            rearrange_logger.warning(
-                f"Could not find a collision free start for {self.ep_info.episode_id}"
+            print(
+                f"Could not find a collision free start for {self.ep_info.episode_id}, num collisions: {num_collisions}"
             )
+        print(f"Found base position in {attempt_i} attempts.")
         return start_pos, start_rot
 
     def _setup_targets(self, ep_info):

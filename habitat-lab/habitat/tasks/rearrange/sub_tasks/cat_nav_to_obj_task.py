@@ -21,7 +21,6 @@ class CatDynNavRLEnv(DynNavRLEnv):
             config=config,
             *args,
             dataset=dataset,
-            should_place_robot=False,
             **kwargs,
         )
         self._receptacle_semantic_ids: Dict[int, int] = {}

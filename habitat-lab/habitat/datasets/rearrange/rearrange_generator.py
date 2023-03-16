@@ -9,6 +9,8 @@ import os.path as osp
 import time
 from collections import defaultdict
 import itertools
+import gzip
+from pathlib import Path
 
 try:
     from collections import Sequence
@@ -39,6 +41,7 @@ from habitat.datasets.rearrange.samplers.receptacle import (
 from habitat.sims.habitat_simulator.debug_visualizer import DebugVisualizer
 from habitat.utils.common import cull_string_list_by_substrings
 from habitat_sim.nav import NavMeshSettings
+from habitat.datasets.rearrange.rearrange_dataset import RearrangeDatasetV0
 
 
 def get_sample_region_ratios(load_dict) -> Dict[str, float]:
@@ -72,6 +75,7 @@ class RearrangeEpisodeGenerator:
         cfg: DictConfig,
         debug_visualization: bool = False,
         limit_scene_set: Optional[str] = None,
+        limit_scene: Optional[str] = None,
     ) -> None:
         """
         Initialize the generator object for a particular configuration.
@@ -81,6 +85,7 @@ class RearrangeEpisodeGenerator:
         self.cfg = cfg
         self.start_cfg = self.cfg.copy()
         self._limit_scene_set = limit_scene_set
+        self._limit_scene = limit_scene
 
         # debug visualization settings
         self._render_debug_obs = self._make_debug_video = debug_visualization
@@ -310,6 +315,8 @@ class RearrangeEpisodeGenerator:
 
             # cull duplicates
             unified_scene_set = sorted(set(unified_scene_set))
+            if self._limit_scene:
+                unified_scene_set = [scene for scene in unified_scene_set if self._limit_scene in scene]
             self._scene_sampler = samplers.MultiSceneSampler(unified_scene_set)
         else:
             logger.error(
@@ -419,7 +426,7 @@ class RearrangeEpisodeGenerator:
             self.vdb.get_observation()
 
     def generate_episodes(
-        self, num_episodes: int = 1, verbose: bool = False
+        self, num_episodes: int = 1, verbose: bool = False, output_path: str = None
     ) -> List[RearrangeEpisode]:
         """
         Generate a fixed number of episodes.
@@ -432,14 +439,33 @@ class RearrangeEpisodeGenerator:
         rom = self.sim.get_rigid_object_manager()
         self.existing_rigid_objects = set(rom.get_object_handles())
 
+        self.times = defaultdict(float)
+        import time
+
         while len(generated_episodes) < num_episodes:
+            t = time.process_time()
             new_episode = self.generate_single_episode()
+            print("Tot time", time.process_time() - t)
             if new_episode is None:
                 failed_episodes += 1
                 continue
             generated_episodes.append(new_episode)
             if verbose:
+                print(
+                    "Generated NEW EPISODE! Num episodes:",
+                    len(generated_episodes),
+                )
                 pbar.update(1)
+            if generated_episodes and len(generated_episodes) % 50 == 0 and output_path:
+                logger.info(f"Writing {len(generated_episodes)} to {output_path}...")
+                dataset = RearrangeDatasetV0()
+                dataset.episodes = generated_episodes
+                out = Path(output_path)
+                stem, suffix = out.name.split(".", 1)
+                out = out.with_name(f"{stem}_{len(generated_episodes)}-ep.{suffix}")
+                with gzip.open(out, "wt") as f:
+                    f.write(dataset.to_json())
+
         if verbose:
             pbar.close()
 
@@ -447,30 +473,51 @@ class RearrangeEpisodeGenerator:
             f"Generated {num_episodes} episodes in {num_episodes+failed_episodes} tries."
         )
 
+        print(self.times)
+
         return generated_episodes
+
+    def gen_cleanup(self, times):
+        for k, v in times.items():
+            self.times[k] += v
+        print(times)
 
     def generate_single_episode(self) -> Optional[RearrangeEpisode]:
         """
         Generate a single episode, sampling the scene.
         """
+        import time
+
+        pt = time.process_time()
+        times = {}
 
         # Reset the number of allowed objects per receptacle.
         recep_tracker = ReceptacleTracker(
             {k: v for k, v in self.cfg.max_objects_per_receptacle},
             self._receptacle_sets,
         )
+        t = time.process_time()
+        times["t1"] = t - pt
+        pt = t
 
         self._reset_samplers()
         self.episode_data: Dict[str, Dict[str, Any]] = {
             "sampled_objects": {},  # object sampler name -> sampled object instances
             "sampled_targets": {},  # target sampler name -> (object, target state)
         }
+        t = time.process_time()
+        times["t2"] = t - pt
+        pt = t
 
         ep_scene_handle = self.generate_scene()
         scene_base_dir = osp.dirname(osp.dirname(ep_scene_handle))
+        t = time.process_time()
+        times["t3"] = t - pt
+        pt = t
 
         rom = self.sim.get_rigid_object_manager()
         self.existing_rigid_objects = set(rom.get_object_handles())
+        print("Existing objects at start:", self.existing_rigid_objects)
 
         scene_name = osp.basename(ep_scene_handle).split(".")[0]
         navmesh_path = osp.join(
@@ -491,8 +538,14 @@ class RearrangeEpisodeGenerator:
             )
             os.makedirs(osp.dirname(navmesh_path), exist_ok=True)
             self.sim.pathfinder.save_nav_mesh(navmesh_path)
+        t = time.process_time()
+        times["t4"] = t - pt
+        pt = t
 
         compute_navmesh_island_classifications(self.sim)
+        t = time.process_time()
+        times["t4.1"] = t - pt
+        pt = t
 
         self._get_object_target_samplers()
         target_numbers = {
@@ -505,6 +558,9 @@ class RearrangeEpisodeGenerator:
             targ_sampler_name_to_obj_sampler_names[
                 sampler_name
             ] = targ_sampler_cfg["params"]["object_samplers"]
+        t = time.process_time()
+        times["t5"] = t - pt
+        pt = t
 
         receptacles = find_receptacles(self.sim)
         navigable_receptacles = {}
@@ -517,6 +573,9 @@ class RearrangeEpisodeGenerator:
                     nav_to_min_dist,
                 )
             sampler.receptacle_instances = navigable_receptacles[nav_to_min_dist]
+        t = time.process_time()
+        times["t5.1"] = t - pt
+        pt = t
 
         target_receptacles = defaultdict(list)
         all_target_receptacles = []
@@ -536,6 +595,9 @@ class RearrangeEpisodeGenerator:
 
             target_receptacles[obj_sampler_name].extend(new_target_receptacles)
             all_target_receptacles.extend(new_target_receptacles)
+        t = time.process_time()
+        times["t6"] = t - pt
+        pt = t
 
         goal_receptacles = {}
         all_goal_receptacles = []
@@ -557,9 +619,15 @@ class RearrangeEpisodeGenerator:
 
             goal_receptacles[sampler_name] = new_goal_receptacles
             all_goal_receptacles.extend(new_goal_receptacles)
+        t = time.process_time()
+        times["t7"] = t - pt
+        pt = t
 
         for recep in [*all_goal_receptacles, *all_target_receptacles]:
             recep_tracker.inc_count(recep.name)
+        t = time.process_time()
+        times["t8"] = t - pt
+        pt = t
 
         # sample AO states for objects in the scene
         # ao_instance_handle -> [ (link_ix, state), ... ]
@@ -570,6 +638,8 @@ class RearrangeEpisodeGenerator:
                 [*all_target_receptacles, *all_goal_receptacles],
             )
             if sampler_states is None:
+                times["t9"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             for sampled_instance, link_states in sampler_states.items():
                 if sampled_instance.handle not in ao_states:
@@ -577,11 +647,17 @@ class RearrangeEpisodeGenerator:
                 for link_ix, joint_state in link_states.items():
                     ao_states[sampled_instance.handle][link_ix] = joint_state
         self.ao_states = ao_states
+        t = time.process_time()
+        times["t9"] = t - pt
+        pt = t
 
         # visualize after setting AO states to correctly see scene state
         if self._render_debug_obs:
             self.visualize_scene_receptacles()
             self.vdb.make_debug_video(prefix="receptacles_")
+        t = time.process_time()
+        times["t10"] = t - pt
+        pt = t
 
         # sample object placements
         self.object_to_containing_receptacle = {}
@@ -594,6 +670,8 @@ class RearrangeEpisodeGenerator:
                 vdb=(self.vdb if self._render_debug_obs else None),
             )
             if len(object_sample_data) == 0:
+                times["t11"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             new_objects, receptacles = zip(*object_sample_data)
             for obj, rec in zip(new_objects, receptacles):
@@ -620,12 +698,17 @@ class RearrangeEpisodeGenerator:
                     self.vdb.look_at(new_object.translation)
                     self.vdb.get_observation()
                 logger.info("   ... done")
+        t = time.process_time()
+        times["t11"] = t - pt
+        pt = t
 
         # simulate the world for a few seconds to validate the placements
         if not self.settle_sim():
             logger.warning(
                 "Aborting episode generation due to unstable state."
             )
+            times["t12"] = time.process_time() - t
+            self.gen_cleanup(times)
             return None
 
         for sampler, target_sampler_info in zip(
@@ -640,6 +723,9 @@ class RearrangeEpisodeGenerator:
                 x.creation_attributes.handle
                 for x in sampler.object_instance_set
             ]
+        t = time.process_time()
+        times["t12"] = t - pt
+        pt = t
 
         target_refs: Dict[str, str] = {}
 
@@ -659,6 +745,8 @@ class RearrangeEpisodeGenerator:
                 object_to_containing_receptacle=self.object_to_containing_receptacle,
             )
             if new_target_objects is None:
+                times["t13"] = time.process_time() - t
+                self.gen_cleanup(times)
                 return None
             for target_handle, (
                 new_target_obj,
@@ -670,6 +758,8 @@ class RearrangeEpisodeGenerator:
                     match_obj.translation - new_target_obj.translation
                 )
                 if dist < self.cfg.min_dist_from_start_to_goal:
+                    times["t13"] = time.process_time() - t
+                    self.gen_cleanup(times)
                     return None
 
             # cache transforms and add visualizations
@@ -708,6 +798,9 @@ class RearrangeEpisodeGenerator:
                         mn.Color4(1.0, 0.0, 0.0, 1.0),
                     )
                     self.vdb.get_observation()
+        t = time.process_time()
+        times["t13"] = t - pt
+        pt = t
 
         # collect final object states and serialize the episode
         # TODO: creating shortened names should be automated and embedded in the objects to be done in a uniform way
@@ -723,6 +816,9 @@ class RearrangeEpisodeGenerator:
                     np.array(sampled_obj.transformation),
                 )
             )
+        t = time.process_time()
+        times["t14"] = t - pt
+        pt = t
 
         self.num_ep_generated += 1
 
@@ -744,8 +840,11 @@ class RearrangeEpisodeGenerator:
         name_to_receptacle = {
             k: v.name for k, v in self.object_to_containing_receptacle.items()
         }
+        t = time.process_time()
+        times["t15"] = t - pt
+        pt = t
 
-        return RearrangeEpisode(
+        ep = RearrangeEpisode(
             scene_dataset_config=self.cfg.dataset_path,
             additional_obj_config_paths=self.cfg.additional_object_paths,
             episode_id=str(self.num_ep_generated - 1),
@@ -767,12 +866,25 @@ class RearrangeEpisodeGenerator:
             info={"object_labels": target_refs},
         )
 
+        t = time.process_time()
+        times["t16"] = t - pt
+        pt = t
+
+        for k, v in times.items():
+            self.times[k] += v
+        print(times)
+
+        return ep
+
     def initialize_sim(self, scene_name: str, dataset_path: str) -> None:
         """
         Initialize a new Simulator object with a selected scene and dataset.
         """
         # Setup a camera coincident with the agent body node.
         # For debugging visualizations place the default agent where you want the camera with local -Z oriented toward the point of focus.
+        import time
+
+        t = time.process_time()
         camera_resolution = [540, 720]
         sensors = {
             "rgb": {
@@ -826,8 +938,15 @@ class RearrangeEpisodeGenerator:
                 for ao_handle in self.ao_states.keys():
                     aom.get_object_by_handle(ao_handle).clear_joint_states()
                 self.sim.reset()
+                try:
+                    assert len(rom.get_object_handles()) == len(self.existing_rigid_objects)
+                except:
+                    import pdb
+                    pdb.set_trace()
             else:
                 self.sim.reconfigure(hab_cfg)
+        print("sim setup", time.process_time() - t)
+        t = time.process_time()
 
         # setup the debug camera state to the center of the scene bounding box
         scene_bb = (
@@ -842,6 +961,7 @@ class RearrangeEpisodeGenerator:
             else self.vdb.output_path
         )
         self.vdb = DebugVisualizer(self.sim, output_path=output_path)
+        print("debug viz", time.process_time() - t)
 
     def settle_sim(
         self, duration: float = 5.0, make_video: bool = True

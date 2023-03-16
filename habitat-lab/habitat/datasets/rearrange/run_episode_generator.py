@@ -259,6 +259,12 @@ if __name__ == "__main__":
         help="Limit to one of the scene set samplers. Used to differentiate scenes from training and eval.",
     )
     parser.add_argument(
+        "--limit-scene",
+        type=str,
+        default=None,
+        help="Limit to one of the scenes.",
+    )
+    parser.add_argument(
         "--num-episodes",
         type=int,
         default=1,
@@ -289,6 +295,7 @@ if __name__ == "__main__":
         cfg=cfg,
         debug_visualization=args.debug,
         limit_scene_set=args.limit_scene_set,
+        limit_scene=args.limit_scene,
     ) as ep_gen:
         if not osp.isdir(args.db_output):
             os.makedirs(args.db_output)
@@ -348,9 +355,6 @@ if __name__ == "__main__":
             import time
 
             start_time = time.time()
-            dataset.episodes += ep_gen.generate_episodes(
-                args.num_episodes, args.verbose
-            )
             output_path = args.out
             if output_path is None:
                 # default
@@ -370,6 +374,10 @@ if __name__ == "__main__":
                 and len(osp.dirname(output_path)) > 0
             ):
                 os.makedirs(osp.dirname(output_path))
+
+            dataset.episodes += ep_gen.generate_episodes(
+                args.num_episodes, args.verbose, output_path
+            )
             # serialize the dataset
             import gzip
 

@@ -8,8 +8,10 @@ import random
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
+import quaternion
 import torch
 
+import habitat
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.config.default import get_config
 
